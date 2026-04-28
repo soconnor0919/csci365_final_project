@@ -32,7 +32,7 @@ suzuka_raw.mp4
       │  T_START=5.0s, DURATION=5.0s → 300 frames @ 60fps, 1280×720
       ▼
 [2] Per-frame mask detection (classical CV)
-      │  Sobel-Y arch contour + tilt-aware keel probe fitting
+      │  Sobel-Y filled arch body + fitted keel + F1 logo contour
       ▼
 [3] Method 1 — LaMa spatial inpainting (neural, per-frame)
       │  Fast Fourier Convolution network, pretrained, MPS/CUDA inference
@@ -43,7 +43,7 @@ suzuka_raw.mp4
 [5] Export: output/spatial.mp4, output/temporal.mp4
 ```
 
-Everything runs in **`halo_inpainting 3.ipynb`**. There is no other source file.
+Everything runs in **`halo_inpainting.ipynb`**. There is no other source file.
 
 ---
 
@@ -57,7 +57,7 @@ The arch's bottom edge is a sharp dark→bright transition (titanium to sky) tha
 2. Apply **Sobel-Y** (vertical gradient, ksize=5). Keep only positive values (dark-to-bright transitions going downward).
 3. Per column, take the row of the maximum Sobel response as the arch bottom. Columns with weak response (< 15% of max) default to the band boundary.
 4. Smooth with median filter (size=21) then Gaussian (σ=30px) to produce a continuous contour.
-5. Add a 10px downward pad so the mask slightly over-covers the arch edge rather than clipping it.
+5. Use that contour as the lower anchor for a controlled filled arch body. This avoids masking the whole roof/sky slab while still covering the Halo interior and bright sunlit edges.
 
 ### Keel
 
@@ -71,6 +71,18 @@ The keel is partially occluded in many frames (steering wheel, driver's hands). 
 6. **Occlusion fallback**: if zero probes pass the quality gate (hands fully covering the keel), carry forward the previous frame's keel centre rather than jumping to frame centre.
 
 The resulting keel mask is drawn per-row at the fitted `cx`, with half-width that tapers from wider at the arch junction (extra coverage for the T-joint blend zone) to narrower at the bottom.
+
+### Controlled mask construction
+
+The active mask is now built from explicit geometry instead of allowing dark contours to flood the region:
+
+1. Build a filled arch-body region upward from the detected Sobel lower edge to the top video border, with only a tiny lower pad for antialiased rim pixels.
+2. Draw a tapered keel mask along the robust fitted keel line.
+3. Add a small yoke patch plus a rounded ellipse where the keel meets the arch.
+4. Extract the fixed F1 logo as white contours from the top-left crop and add only those contour pixels.
+5. Apply close, hole-fill, and small dilate cleanup to cover sunlit bright rims and remove internal gaps.
+
+This keeps the roof/visor strip outside the mask while covering the Halo body, its brighter borders, and the permanent broadcast logo.
 
 ### Why slope matters
 
@@ -130,7 +142,7 @@ Farnebäck estimates flow via local polynomial expansion, which breaks down at t
 uv sync
 
 # Launch notebook
-uv run jupyter notebook "halo_inpainting 3.ipynb"
+uv run jupyter notebook "halo_inpainting.ipynb"
 ```
 
 Run cells top-to-bottom. The two slow cells are:

@@ -78,9 +78,9 @@ The active mask is now built from explicit geometry instead of allowing dark con
 
 1. Build a filled arch-body region upward from the detected Sobel lower edge to the top video border, with only a tiny lower pad for antialiased rim pixels.
 2. Draw a tapered keel mask along the robust fitted keel line.
-3. Add a small yoke patch plus a rounded ellipse where the keel meets the arch.
+3. Add a widened yoke patch plus a rounded ellipse where the keel meets the arch.
 4. Extract the fixed F1 logo as white contours from the top-left crop and add only those contour pixels.
-5. Apply close, hole-fill, and small dilate cleanup to cover sunlit bright rims and remove internal gaps.
+5. Apply close, hole-fill, and a modest final dilate cleanup to cover sunlit bright rims and remove internal gaps.
 
 This keeps the roof/visor strip outside the mask while covering the Halo body, its brighter borders, and the permanent broadcast logo.
 

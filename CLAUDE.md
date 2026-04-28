@@ -4,17 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Environment
 
-All Python work runs in the `dip26` conda environment (Python 3.12):
+The project uses a **uv-managed venv** (`.venv/`, Python 3.12). Dependencies are declared in `pyproject.toml`.
 
 ```bash
+# Create / sync the venv (first time or after pyproject.toml changes)
+uv sync
+
 # Run a script
-/opt/homebrew/Caskroom/miniconda/base/envs/dip26/bin/python script.py
+uv run python script.py
 
 # Run Jupyter
-conda run -n dip26 jupyter notebook
+uv run jupyter notebook
 ```
 
-Key packages: `torch 2.10`, `torchvision 0.26`, `opencv-python 4.11`, `scipy 1.17`, `simple-lama-inpainting 0.1.2`, `yt-dlp`. MPS (Apple Silicon GPU) is available and used for model inference.
+The legacy `dip26` conda environment (`/opt/homebrew/Caskroom/miniconda/base/envs/dip26/`) also works and has the same packages — use its Python directly for quick one-off diagnostic scripts run outside the notebook:
+
+```bash
+/opt/homebrew/Caskroom/miniconda/base/envs/dip26/bin/python script.py
+```
+
+Key packages: `torch 2.10+`, `torchvision 0.26`, `opencv-python 4.11`, `scipy 1.17`, `simple-lama-inpainting 0.1.2`, `yt-dlp`. MPS (Apple Silicon GPU) is available and used for model inference; CUDA is selected automatically if present.
 
 ## Project Structure
 

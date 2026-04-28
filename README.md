@@ -126,11 +126,11 @@ Farnebäck estimates flow via local polynomial expansion, which breaks down at t
 ## Running
 
 ```bash
-# Activate environment
-conda activate dip26
+# Install dependencies (first time)
+uv sync
 
 # Launch notebook
-jupyter notebook "halo_inpainting 3.ipynb"
+uv run jupyter notebook "halo_inpainting 3.ipynb"
 ```
 
 Run cells top-to-bottom. The two slow cells are:

@@ -32,18 +32,18 @@ suzuka_raw.mp4
       │  T_START=5.0s, DURATION=5.0s → 300 frames @ 60fps, 1280×720
       ▼
 [2] Per-frame mask detection (classical CV)
-      │  Sobel-Y filled arch body + fitted keel + F1 logo contour
+      │  Sobel-Y arch fill + fitted keel + connector line + F1 logo contour
       ▼
-[3] Method 1 — LaMa spatial inpainting (neural, per-frame)
+[3] Method 1 - LaMa spatial inpainting (neural, per-frame)
       │  Fast Fourier Convolution network, pretrained, MPS/CUDA inference
       ▼
-[4] Method 2 — RAFT temporal propagation (neural, frame-to-frame)
-      │  Dense optical flow → backward warp → distance-transform blend
+[4] Method 2 - RAFT temporal propagation (neural, frame-to-frame)
+      │  Dense optical flow -> backward warp -> distance-transform blend
       ▼
-[5] Export: output/spatial.mp4, output/temporal.mp4
+[5] Playback + export: output/spatial.mp4, output/temporal.mp4
 ```
 
-Everything runs in **`halo_inpainting.ipynb`**. There is no other source file.
+Everything runs in **`OConnor_HaloInpainting_DEMO.ipynb`** as a single top-to-bottom path.
 
 ---
 
@@ -67,8 +67,8 @@ The keel is partially occluded in many frames (steering wheel, driver's hands). 
 2. Each probe finds the column of minimum brightness (darkest point = keel centre). Reject probes within 15 px of the search boundary (likely picking up the cockpit surround) and probes where contrast < 10 gray levels (keel is occluded).
 3. Fit a line `cx = slope·y + intercept` through accepted `(y, cx)` probe pairs using `np.polyfit`.
 4. **Outlier removal**: compute per-probe residuals; drop any probe > 20 px from the fit and refit. This handles cases where the steering wheel bar registers at one probe level, corrupting the slope.
-5. **Pathological guard**: if `|slope| > 1.5 px/row` after outlier removal, fall back to a vertical mask at the median probe cx.
-6. **Occlusion fallback**: if zero probes pass the quality gate (hands fully covering the keel), carry forward the previous frame's keel centre rather than jumping to frame centre.
+5. **Pathological guard**: if the fitted slope is too steep, fall back to a vertical mask at the median probe cx.
+6. **Temporal jump guard**: if a low-confidence fit or late-frame edge produces an impossible frame-to-frame centre jump, carry forward the previous keel centre rather than drawing a diagonal mask.
 
 The resulting keel mask is drawn per-row at the fitted `cx`, with half-width that tapers from wider at the arch junction (extra coverage for the T-joint blend zone) to narrower at the bottom.
 
@@ -79,18 +79,19 @@ The active mask is now built from explicit geometry instead of allowing dark con
 1. Build a filled arch-body region upward from the detected Sobel lower edge to the top video border, with only a tiny lower pad for antialiased rim pixels.
 2. Draw a tapered keel mask along the robust fitted keel line.
 3. Add a widened yoke patch plus a rounded ellipse where the keel meets the arch.
-4. Extract the fixed F1 logo as white contours from the top-left crop and add only those contour pixels.
-5. Apply close, hole-fill, and a modest final dilate cleanup to cover sunlit bright rims and remove internal gaps.
+4. Add a tapered connector line between the left and right arch sections and fill upward from it to keep the convergence shoulders connected.
+5. Extract the fixed F1 logo as white contours from the top-left crop and add only those contour pixels.
+6. Apply close, hole-fill, and a modest final dilate cleanup to cover sunlit bright rims and remove internal gaps.
 
 This keeps the roof/visor strip outside the mask while covering the Halo body, its brighter borders, and the permanent broadcast logo.
 
 ### Why slope matters
 
-The visor camera rotates with the driver's head. Through fast corners, a physically vertical keel projects at up to ~−0.9 px/row of image-plane tilt (top of keel displaced 65+ px right of bottom over the probe range). A vertical mask would miss the top or bottom of the keel. The tilt-aware fit keeps the mask aligned.
+The visor camera rotates with the driver's head, so a vertical mask can miss the top or bottom of the keel. The tilt-aware fit keeps the mask aligned, while a temporal jump guard rejects implausible late-frame center jumps caused by roof or cockpit edges being mistaken for the keel.
 
 ---
 
-## Method 1 — LaMa Spatial Inpainting (Section 5)
+## Method 1 - LaMa Spatial Inpainting (Section 5)
 
 **Model:** `simple-lama-inpainting` (wraps Suvorov et al., *Resolution-robust Large Mask Inpainting with Fourier Convolutions*, WACV 2022).
 
@@ -105,32 +106,30 @@ The earlier Method 1 used VGG-16 relu2_2 features to find best-matching 16-px pa
 
 ---
 
-## Method 2 — RAFT Temporal Propagation (Section 6)
+## Method 2 - RAFT Temporal Propagation (Section 6)
 
 **Model:** `torchvision` RAFT-small (Teed & Deng, *RAFT: Recurrent All-Pairs Field Transforms for Optical Flow*, ECCV 2020).
 
 For each frame *t*:
-1. Estimate dense optical flow between the previous *clean* frame and the current LaMa-inpainted frame using RAFT. Using the LaMa frame rather than the raw frame avoids the Halo pixels contaminating the flow estimate.
+1. Estimate dense optical flow between the previous clean frame and the current LaMa-inpainted frame.
 2. Backward-warp the previous clean frame into the current frame's coordinates.
-3. Blend: pixels far from the mask boundary (deep inside the mask region, measured by distance transform) are taken from the warp; pixels near the boundary are taken from the current frame. This avoids "ghosting" at edges where the warp is inaccurate.
-4. Every 60 frames, reset the temporal chain to the LaMa result to prevent accumulated warp errors from drifting.
+3. Blend the warped frame and the current LaMa result inside the mask using a distance-transform alpha.
+4. Reset the temporal chain periodically to limit accumulated warp errors.
 
-**Why not Farnebäck?**
-Farnebäck estimates flow via local polynomial expansion, which breaks down at the fast lateral camera panning through Suzuka's fast corners and under the complex layered backgrounds (ferris wheel, grandstands, pit lane structures all moving at different apparent speeds). RAFT's learned feature representations handle large displacements and motion blur far more robustly.
+RAFT is included as a comparison method. It can reduce shimmer when the previous fill is good, but it can also preserve artifacts when the warped content is wrong.
 
 ---
 
-## What Still Needs Doing
+## Limitations and Next Steps
 
-### Known issues
-- **Frames 13–59**: ~47-frame occlusion window where the keel is fully covered by hands/wheel. The mask correctly holds the last-known cx, but the inpainter has to synthesize a large contiguous region without temporal reference. Temporal quality may be lower here.
-- **Arch/keel junction**: The junction zone (where the keel meets the arch) is an edge case — the entire row is masked so the horizontal scanline fill has no source pixels. Currently falls through to LaMa's output for that zone.
-- **Keel lower boundary**: The keel mask terminates at 65% of frame height (`strut_y1=0.65`). Frames where the keel extends further (driver leaning back) may show residual keel at the bottom of the mask region.
+The notebook is ready to demonstrate the working pipeline, but these are useful discussion points for the final presentation:
 
-### Possible improvements
-- **Temporal mask smoothing**: Apply a small temporal median filter to `keel_cx` values to reduce per-frame jitter, especially during the transition back from occlusion at frame 60.
+- **Occlusion window**: when hands or the wheel hide the keel, the mask carries forward the last reliable center. This is stable, but the inpainter must synthesize a large contiguous region without much current-frame evidence.
+- **Arch/keel junction**: the connector-line fill improves the convergence shoulders, but this remains the most sensitive part of the mask because small misses are visually obvious.
+- **Temporal propagation tradeoff**: RAFT can reduce shimmer when the previous fill is good, but it can also preserve or amplify artifacts. That makes it a useful comparison, not a guaranteed improvement over LaMa.
+- **Mask smoothing**: a future version could apply a small temporal median filter to `keel_cx` values to reduce per-frame jitter, especially during the transition back from occlusion.
 - **Longer clip**: The current 5-second / 300-frame window was chosen for iteration speed. A full-length export would need `DURATION` extended and the `output/` filenames versioned to avoid overwriting baseline results.
-- **Evaluation metrics**: PSNR/SSIM against a hand-composited ground truth for a few keyframes would give a quantitative comparison of Method 1 vs Method 2.
+- **Evaluation metrics**: PSNR/SSIM against a hand-composited ground truth for a few keyframes would give a quantitative complement to the visual result.
 - **Probe robustness**: The 6 probe rows are hardcoded in pixel coordinates. For clips from different moments in the race (different helmet height in frame), these may need adjustment. Deriving probe rows from the detected arch bottom would make this automatic.
 
 ---
@@ -142,12 +141,12 @@ Farnebäck estimates flow via local polynomial expansion, which breaks down at t
 uv sync
 
 # Launch notebook
-uv run jupyter notebook "halo_inpainting.ipynb"
+uv run jupyter notebook "OConnor_HaloInpainting_DEMO.ipynb"
 ```
 
-Run cells top-to-bottom. The two slow cells are:
+Run cells top-to-bottom. The slow cells are:
 - **`cell-spatial`** (LaMa): ~2 min on MPS, ~25 min on CPU for 300 frames
-- **`cell-temporal-run`** (RAFT): ~3–5 min on MPS for 300 frames
+- **`cell-temporal-run`** (RAFT): ~3-5 min on MPS for 300 frames
 
 Tune `T_START` and `DURATION` in `cell-load` to work on a shorter window during development.
 
@@ -158,7 +157,7 @@ Tune `T_START` and `DURATION` in `cell-load` to work on a shorter window during 
 | Package | Version | Purpose |
 |---|---|---|
 | `opencv-python` | 4.11 | frame I/O, image ops, Sobel, remap |
-| `torch` / `torchvision` | 2.10 / 0.26 | RAFT model, MPS/CUDA backend |
+| `torch` / `torchvision` | 2.10 / 0.26 | PyTorch backend, RAFT optical flow |
 | `simple-lama-inpainting` | 0.1.2 | LaMa pretrained inference |
 | `scipy` | 1.17 | `median_filter` for arch contour smoothing |
 | `yt-dlp` | 2026.3 | source video download |
